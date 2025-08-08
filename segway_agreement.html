@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📜</text></svg>">
+    <title>הסכם בעלות ושימוש על סגווי</title>
+    
+    <!-- Signature Pad library -->
+    <script src="https://cdn.jsdelivr.net/npm/signature_pad@2.3.2/dist/signature_pad.min.js"></script>
+    
+    <!-- Firebase SDKs - Modular Version -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-analytics.js";
+
+// Firebase config
+const firebaseConfig = {
+    apiKey: "AIzaSyDlyDbpwcBcWvFnvYHb84dMEpaQFTjv-HY",
+    authDomain: "tester-69fa9.firebaseapp.com",
+    projectId: "tester-69fa9",
+    storageBucket: "tester-69fa9.firebasestorage.app",
+    messagingSenderId: "378563229004",
+    appId: "1:378563229004:web:5136b724eb84fd00e44be9",
+    measurementId: "G-BFJ1QQM3MS"
+};
+
+// Init Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+const database = getFirestore(app);
+
+// משתנים גלובליים
+const AGREEMENT_ID = 'shahar-yahli-segway-agreement'; // ID קבוע להסכם
+const signaturePads = {};
+
+// הפיכת הפונקציות לגלובליות
+window.saveShaharSignature = saveShaharSignature;
+window.saveYahliSignature = saveYahliSignature;
+window.clearSignature = clearSignature;
+
+function showCustomAlert(message, type = 'error') {
+    const alertBox = document.getElementById('custom-alert');
+    alertBox.textContent = message;
+    alertBox.className = type === 'success' ? 'success' : 'error';
+    alertBox.style.display = 'block';
+    setTimeout(() => {
+        alertBox.style.display = 'none';
+    }, 4000);
+}
+
+function setupSignaturePad(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+    canvas.width = rect.width * ratio;
+    canvas.height = rect.height * ratio;
+    canvas.getContext("2d").scale(ratio, ratio);
+    
+    // הגדרת גודל CSS
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+
+    const signaturePad = new SignaturePad(canvas, {
+        backgroundColor: 'rgba(255, 255, 255, 0)',
+        penColor: 'rgb(0, 0, 0)',
+        minWidth: 1,
+        maxWidth: 3
+    });
+
+    signaturePads[canvasId] = signaturePad;
+    console.log(`Signature pad setup complete for ${canvasId}`);
+}
+
+function lockSignaturePad(canvasId) {
+    const pad = signaturePads[canvasId];
+    if (pad) {
+        pad.off();
+        const canvas = document.getElementById(canvasId);
+        canvas.style.cursor = 'not-allowed';
+        canvas.style.backgroundColor = '#f0f8ff';
+        canvas.style.border = '2px solid #28a745';
+        console.log(`Locked signature pad: ${canvasId}`);
+    }
+}
+
+function unlockSignaturePad(canvasId) {
+    const pad = signaturePads[canvasId];
+    if (pad) {
+        pad.on();
+        const canvas = document.getElementById(canvasId);
+        canvas.style.cursor = 'crosshair';
+        canvas.style.backgroundColor = '#fff';
+        canvas.style.border = '2px solid #000';
+        console.log(`Unlocked signature pad: ${canvasId}`);
+    }
+}
+
+function loadSignatureToCanvas(canvasId, dataURL) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    const image = new Image();
+    
+    image.onload = function() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        lockSignaturePad(canvasId);
+        console.log(`Signature loaded to canvas: ${canvasId}`);
+    };
+    
+    image.src = dataURL;
+}
+
+function clearSignature(canvasId) {
+    const pad = signaturePads[canvasId];
+    if (pad) {
+        pad.clear();
+        unlockSignaturePad(canvasId);
+        showCustomAlert('החתימה נוקתה. ניתן לחתום מחדש.', 'success');
+    }
+}
+
+function formatIsraeliDate() {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+function updateDateDisplay(data) {
+    console.log('Updating date display with data:', data);
+    
+    if (data.firstSignatureTime) {
+        document.getElementById('firstSignDate').innerHTML = 
+            `תאריך חתימה ראשוני<br><span>${data.firstSignatureTime}</span>`;
+        console.log('Updated first signature date:', data.firstSignatureTime);
+    }
+    
+    if (data.lastSignatureTime) {
+        document.getElementById('lastSignDate').innerHTML = 
+            `תאריך חתימה אחרון<br><span>${data.lastSignatureTime}</span>`;
+        console.log('Updated last signature date:', data.lastSignatureTime);
+    }
+}
+
+async function loadAgreementData() {
+    try {
+        console.log('Loading agreement data...');
+        const docRef = doc(database, 'agreements', AGREEMENT_ID);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            console.log('Agreement data loaded:', data);
+
+            // טעינת חתימת שחר
+            if (data.shaharSignature) {
+                loadSignatureToCanvas('signatureCanvas1', data.shaharSignature);
+                document.getElementById('agreementCheckboxשחר').checked = true;
+                console.log('Loaded Shahar signature');
+            }
+
+            // טעינת חתימת יהלי
+            if (data.yahliSignature) {
+                loadSignatureToCanvas('signatureCanvas2', data.yahliSignature);
+                document.getElementById('agreementCheckboxיהלי').checked = true;
+                console.log('Loaded Yahli signature');
+            }
+
+            // עדכון תאריכים
+            updateDateDisplay(data);
+            
+            return data;
+        } else {
+            console.log('No existing agreement found');
+            return null;
+        }
+    } catch (error) {
+        console.error('Error loading agreement:', error);
+        showCustomAlert('שגיאה בטעינת נתוני ההסכם');
+        return null;
+    }
+}
+
+async function saveSignature(signerName, canvasId, signatureField) {
+    const checkbox = document.getElementById(`agreementCheckbox${signerName}`);
+    if (!checkbox.checked) {
+        showCustomAlert(`יש לאשר את תנאי ההסכם לפני השמירה עבור ${signerName}.`);
+        return;
+    }
+
+    const pad = signaturePads[canvasId];
+    if (!pad || pad.isEmpty()) {
+        showCustomAlert(`יש לחתום עבור ${signerName} לפני השמירה.`);
+        return;
+    }
+
+    try {
+        console.log(`Saving signature for ${signerName}...`);
+        const dataURL = pad.toDataURL('image/png');
+        const now = formatIsraeliDate();
+        
+        const docRef = doc(database, 'agreements', AGREEMENT_ID);
+        
+        // קריאה של הנתונים הנוכחיים
+        const docSnap = await getDoc(docRef);
+        let existingData = {};
+        
+        if (docSnap.exists()) {
+            existingData = docSnap.data();
+        }
+
+        // הכנת נתונים חדשים
+        const updateData = {
+            [signatureField]: dataURL,
+            [`${signerName.toLowerCase()}SignatureTime`]: now,
+            lastSignatureTime: now
+        };
+
+        // אם זו החתימה הראשונה בכלל
+        if (!existingData.firstSignatureTime) {
+            updateData.firstSignatureTime = now;
+            updateData.firstSigner = signerName;
+        }
+
+        // שמירה/עדכון ב-Firebase
+        if (docSnap.exists()) {
+            await updateDoc(docRef, updateData);
+        } else {
+            updateData.firstSignatureTime = now;
+            updateData.firstSigner = signerName;
+            await setDoc(docRef, updateData);
+        }
+
+        // עדכון התצוגה המקומית
+        const finalData = { ...existingData, ...updateData };
+        updateDateDisplay(finalData);
+        
+        lockSignaturePad(canvasId);
+        
+        const isFirstSignature = !existingData[signatureField];
+        showCustomAlert(
+            `חתימה עבור ${signerName} ${isFirstSignature ? 'נשמרה' : 'עודכנה'} בהצלחה!`, 
+            'success'
+        );
+        
+        console.log(`Signature saved successfully for ${signerName}`);
+        
+    } catch (error) {
+        console.error('Error saving signature:', error);
+        showCustomAlert('אירעה שגיאה בשמירת החתימה. נסה שוב.');
+    }
+}
+
+async function saveShaharSignature() {
+    await saveSignature('שחר', 'signatureCanvas1', 'shaharSignature');
+}
+
+async function saveYahliSignature() {
+    await saveSignature('יהלי', 'signatureCanvas2', 'yahliSignature');
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('DOM loaded, initializing...');
+    
+    // הגדרת לוחות החתימה
+    setTimeout(() => {
+        setupSignaturePad('signatureCanvas1');
+        setupSignaturePad('signatureCanvas2');
+        console.log('Signature pads initialized');
+    }, 100);
+    
+    // טעינת נתונים קיימים
+    setTimeout(async () => {
+        await loadAgreementData();
+        console.log('Agreement data loading completed');
+    }, 500);
+});
+</script>
+
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.8;
+            direction: rtl;
+            text-align: right;
+            margin: 0;
+            padding: 20px;
+            font-size: 1.4em;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+            padding: 30px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background-color: #ffffff;
+            border-radius: 8px;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.8em;
+            color: #333;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .contract-header p {
+            text-align: center;
+            font-size: 1.2em;
+            color: #555;
+        }
+        .contract-header .dates {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin: 20px 0;
+        }
+        .contract-header .dates span {
+            font-weight: bold;
+            display: block;
+            text-align: center;
+        }
+        .contract-header .dates span span {
+            font-weight: normal;
+            font-size: 0.9em;
+            color: #777;
+        }
+        .section-title {
+            font-weight: bold;
+            margin-top: 30px;
+            font-size: 1.8em;
+            color: #555;
+        }
+        ul, ol {
+            padding-right: 30px;
+        }
+        li {
+            margin-bottom: 15px;
+        }
+        .signature-container {
+            margin-top: 60px;
+            padding-top: 30px;
+            border-top: 2px dashed #ccc;
+        }
+        .signature-container h3 {
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 1.6em;
+            color: #333;
+        }
+        .signatures-grid {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 60px;
+            flex-wrap: wrap;
+        }
+        .signature-section {
+            width: 350px;
+            text-align: center;
+            border: 1px solid #e0e0e0;
+            padding: 25px;
+            border-radius: 10px;
+            background-color: #fafafa;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .signature-section p {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            color: #333;
+        }
+        .signature-pad-container {
+            border: 2px solid #000;
+            width: 100%;
+            height: 150px;
+            margin: 15px 0;
+            cursor: crosshair;
+            background-color: #fff;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 5px;
+        }
+        .signature-actions {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            cursor: pointer;
+            font-size: 1em;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+            min-width: 120px;
+        }
+        button.save-btn {
+            background-color: #28a745;
+        }
+        button.save-btn:hover {
+            background-color: #218838;
+        }
+        button.clear-btn {
+            background-color: #dc3545;
+        }
+        button.clear-btn:hover {
+            background-color: #c82333;
+        }
+        button:hover {
+            background-color: #357bd8;
+        }
+        hr {
+            margin: 40px 0;
+            border: 0;
+            border-top: 1px solid #eee;
+        }
+        .agreement-checkbox-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #dc3545;
+            text-align: center;
+        }
+
+        #agreementCheckboxשחר, #agreementCheckboxיהלי {
+            transform: scale(1.5);
+            margin-left: 10px;
+        }
+        
+        /* Custom Alert Styling */
+        #custom-alert {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            color: white;
+            border-radius: 8px;
+            text-align: center;
+            z-index: 1000;
+            display: none;
+        }
+        
+        #custom-alert.error {
+            background-color: #dc3545;
+        }
+        
+        #custom-alert.success {
+            background-color: #28a745;
+        }
+
+        /* Responsive design for smaller screens */
+        @media (max-width: 768px) {
+            .signatures-grid {
+                flex-direction: column;
+                align-items: center;
+                gap: 30px;
+            }
+            .signature-section {
+                width: 90%;
+                max-width: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="custom-alert" class="error"></div>
+    <div class="container" id="contract-content">
+        <h1>הסכם בעלות ושימוש על סגווי</h1>
+        <div class="contract-header">
+            <p class="dates">
+                <span id="firstSignDate">תאריך חתימה ראשוני<br><span>(טרם נחתם)</span></span> |
+                <span id="lastSignDate">תאריך חתימה אחרון<br><span>(טרם נחתם)</span></span>
+            </p>
+            <p><b>בין:</b></p>
+            <p>שחר שלום בן מויאל (להלן: "שחר")</p>
+            <p>יהלי פורת (להלן: "יהלי")</p>
+            <p>(שחר ויהלי יכונו להלן יחד: "הצדדים")</p>
+        </div>
+
+        <p>
+            <b>הואיל</b> והצדדים הסכימו ביניהם לרכוש במשותף כלי רכב ממונע מסוג סגווי (להלן: "הסגווי");
+            <br>
+            <b>והואיל</b> והצדדים מעוניינים להסדיר את תנאי הבעלות, השימוש, האחזקה והאחריות ההדדית ביניהם;
+            <br>
+            <b>לכן</b> הוסכם, הוצהר והותנה בין הצדדים כדלקמן:
+        </p>
+
+        <ol>
+            <li><div class="section-title">מכירת הסגווי:</div>
+                <ol type="א">
+                    <li>שחר יקבל כ-60% מעלות המכירה.</li>
+                    <li>יהלי יקבל כ-40% מעלות המכירה.</li>
+                    <li>מכירת הסגווי לצד שלישי תתאפשר אך ורק בהסכמה מלאה ובכתב של שני הצדדים.</li>
+                </ol>
+            </li>
+            <li><div class="section-title">חלוקת השימוש:</div>
+                <ol type="א">
+                    <li><b>שבוע ראשון:</b>
+                        <ul>
+                            <li>ימים שני - רביעי: השימוש בסגווי יהיה של שחר.</li>
+                            <li>ימים ראשון, חמישי - שבת: השימוש בסגווי יהיה של יהלי.</li>
+                        </ul>
+                    </li>
+                    <li><b>שבוע שני:</b>
+                        <ul>
+                            <li>ימים שני,שלישי,שישי ושבת: השימוש בסגווי יהיה של שחר.</li>
+                            <li>ימים ראשון,רביעי וחמישי: השימוש בסגווי יהיה של יהלי.</li>
+                        </ul>
+                    </li>
+                    <li>לוח הזמנים יחזור על עצמו באופן מחזורי.</li>
+                </ol>
+            </li>
+            <li><div class="section-title">תחזוקה, תיקונים והוצאות:</div>
+                <ol type="א">
+                    <li>כל הוצאה הקשורה לתחזוקה שוטפת של הסגווי (כגון: פנצ'ר, החלפת חלקי בלאי) תחולק באופן שווה בין הצדדים, כלומר 50% לכל צד, אלא אם הוסכם אחרת בכתב.</li>
+                    <li>במקרה של נזק, קלקול או הרס של הסגווי שנגרמו באשמת אחד מהצדדים, הצד הפוגע ישלם באופן בלעדי את מלוא עלות התיקון.</li>
+                </ol>
+            </li>
+            <li><div class="section-title">אחריות וחובות:</div>
+                <ol type="א">
+                    <li>במקרה של תפיסת הסגווי על ידי שוטר, פקח או כל גורם אכיפה אחר, או במקרה של קנס או עבירת תנועה, האחריות והתשלום יחולו באופן בלעדי על הצד שהשתמש בסגווי באותו זמן.</li>
+                    <li>הצדדים מתחייבים לכבד זה את זה, ולנהל כל ויכוח או מחלוקת בכבוד הדדי ועל ידי הידברות, כדי להגיע להסכמה שתהיה מקובלת על שני הצדדים.</li>
+                    <li>הצדדים יטפלו בכלי בזהירות הראויה וימנעו מלהעביר אותו לשימוש של צד שלישי ללא הסכמה הדדית.</li>
+                </ol>
+            </li>
+            <li><div class="section-title">סעיפים כלליים:</div>
+                <ol type="א">
+                    <li>הסכם זה מהווה את ההסכמה המלאה והבלעדית בין הצדדים וגובר על כל הסכם או הבנה קודמים.</li>
+                    <li>חתימת הצדדים על הסכם זה מהווה הסכמה מלאה לכל תנאיו.</li>
+                </ol>
+            </li>
+        </ol>
+
+        <hr>
+
+        <div class="signature-container" id="signatures">
+            <h3>ולראיה באו הצדדים על החתום:</h3>
+            
+            <div class="signatures-grid">
+                <div class="signature-section">
+                    <p><b>שחר שלום בן מויאל</b></p>
+                    <label class="agreement-checkbox-label">
+                        <input type="checkbox" id="agreementCheckboxשחר">
+                        אני מאשר/ת ומסכים/ה לכל תנאי ההסכם.
+                    </label>
+                    <div class="wrapper">
+                        <canvas id="signatureCanvas1" class="signature-pad-container"></canvas>
+                    </div>
+                    <div class="signature-actions">
+                        <button class="save-btn" onclick="saveShaharSignature()">שמור חתימה של שחר</button>
+                        <button class="clear-btn" onclick="clearSignature('signatureCanvas1')">נקה</button>
+                    </div>
+                </div>
+                
+                <div class="signature-section">
+                    <p><b>יהלי פורת</b></p>
+                    <label class="agreement-checkbox-label">
+                        <input type="checkbox" id="agreementCheckboxיהלי">
+                        אני מאשר/ת ומסכים/ה לכל תנאי ההסכם.
+                    </label>
+                     <div class="wrapper">
+                        <canvas id="signatureCanvas2" class="signature-pad-container"></canvas>
+                    </div>
+                    <div class="signature-actions">
+                        <button class="save-btn" onclick="saveYahliSignature()">שמור חתימה של יהלי</button>
+                        <button class="clear-btn" onclick="clearSignature('signatureCanvas2')">נקה</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
